@@ -1,0 +1,43 @@
+// Run in Logs with the Log Analytics workspace selected as the query scope.
+// Replace TargetTable with the table to inspect, for example Syslog or AzureMetrics.
+// Set the portal time range to at least Lookback (or "Set in query").
+// This lists OBSERVED sources, not all configured senders or silent sources.
+// Only logs/metrics stored in this table and TimeGenerated window are included.
+// Source identity is best-effort: resource IDs can identify a monitored resource
+// rather than its forwarding agent. Adapt the identity fields for custom schemas.
+// Blank identity fields mean the record did not supply those identifiers.
+// Rows without any identity are grouped as "Unknown"; they are not one known sender.
+// Null ingestion timestamps remain null; event time is not used as a substitute.
+let TargetTable = "AzureDiagnostics";
+let Lookback = 30d;
+table(TargetTable)
+| where TimeGenerated >= ago(Lookback)
+| extend
+    IngestionTimeUTC = ingestion_time(),
+    SourceResourceId = coalesce(
+        tostring(column_ifexists("_ResourceId", "")),
+        tostring(column_ifexists("ResourceId", ""))),
+    SourceHost = coalesce(
+        tostring(column_ifexists("Computer", "")),
+        tostring(column_ifexists("HostName", "")),
+        tostring(column_ifexists("DeviceName", ""))),
+    SourceRole = coalesce(
+        tostring(column_ifexists("AppRoleName", "")),
+        tostring(column_ifexists("cloud_RoleName", ""))),
+    SourceInstance = coalesce(
+        tostring(column_ifexists("AppRoleInstance", "")),
+        tostring(column_ifexists("cloud_RoleInstance", ""))),
+    SourceSystem = tostring(column_ifexists("SourceSystem", ""))
+| summarize
+    Records = count(),
+    FirstEventUTC = min(TimeGenerated),
+    LastEventUTC = max(TimeGenerated),
+    LastIngestionUTC = max(IngestionTimeUTC)
+    by SourceResourceId, SourceHost, SourceRole, SourceInstance, SourceSystem
+| extend
+    TableName = TargetTable,
+    SourceIdentity = coalesce(SourceResourceId, SourceHost, SourceInstance, SourceRole, SourceSystem, "Unknown")
+| project
+    TableName, SourceIdentity, SourceResourceId, SourceHost, SourceRole,
+    SourceInstance, SourceSystem, Records, FirstEventUTC, LastEventUTC, LastIngestionUTC
+| order by LastIngestionUTC desc nulls last, Records desc
