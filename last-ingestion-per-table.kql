@@ -1,19 +1,15 @@
 // Run in Logs with the Log Analytics workspace selected as the query scope.
-// Set the portal time range to at least Lookback (or "Set in query").
-// Increase Lookback to cover the tables' interactive retention for older data.
-// Only accessible tables with records in this TimeGenerated window appear;
-// recently ingested records with older event timestamps are excluded.
-// Scanning every table can be expensive. Basic/Auxiliary table query restrictions
-// may require querying those tables individually instead of using union *.
+// Set the portal time range to "Set in query" to scan all retained data.
+// Only accessible tables with records in retention appear in the results.
+// Scanning every table across its retained data can be expensive. Basic/Auxiliary
+// table query restrictions may require querying those tables individually instead of using union *.
 // ingestion_time() is approximate UTC ingestion time, not the event timestamp.
-let Lookback = 90d;
-union withsource=TableName *
-| where TimeGenerated >= ago(Lookback)
+union withsource=__LastIngestionSource *
 | extend IngestionTimeUTC = ingestion_time()
-| summarize LastIngestionUTC = max(IngestionTimeUTC) by TableName
+| summarize LastIngestionUTC = max(IngestionTimeUTC) by __LastIngestionSource
 | extend
     IngestionDateUTC = format_datetime(LastIngestionUTC, "yyyy-MM-dd"),
     IngestionTimeUTC = format_datetime(LastIngestionUTC, "HH:mm:ss.fff"),
     TimeSinceLastIngestion = now() - LastIngestionUTC
-| project TableName, LastIngestionUTC, IngestionDateUTC, IngestionTimeUTC, TimeSinceLastIngestion
+| project TableName = __LastIngestionSource, LastIngestionUTC, IngestionDateUTC, IngestionTimeUTC, TimeSinceLastIngestion
 | order by LastIngestionUTC desc nulls last
